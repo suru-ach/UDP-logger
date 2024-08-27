@@ -1,0 +1,10 @@
+To create a UDP logger.
+
+1. Create the producer interface.
+2. Try adding to queue and check if the thread wait on buffer full.
+    use Bounded Buffer of synchronized queue
+3. Test out the UDP client and UDP server.
+    send acknowledgement as well.
+    resend on failure to print.
+4. Integrate another buffer in Server.
+5. Print it out in a log.
