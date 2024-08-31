@@ -1,52 +1,6 @@
-import javax.xml.crypto.Data;
 import java.io.IOException;
 import java.net.*;
-import java.util.Timer;
-import java.util.TimerTask;
-
-// Shared resource
-class Buffer {
-    String[] array;
-    int index_first;
-    int index_second;
-    int full;
-    int capacity;
-
-    Buffer(int capacity) {
-        this.full = this.index_first = this.index_second = 0;
-        this.capacity = capacity;
-        array = new String[capacity];
-    }
-
-    synchronized void put(String payload) {
-        while(capacity == full) {
-            try {
-                wait();
-            } catch(InterruptedException exc) {
-                System.out.println(exc.getMessage());
-            }
-        }
-        array[index_first] = payload;
-        full++;
-        index_first = (index_first+1) % capacity;
-        notify();
-    }
-
-    synchronized String get() {
-        while(full == 0) {
-            try {
-                wait();
-            } catch(InterruptedException exc) {
-                System.out.println(exc.getMessage());
-            }
-        }
-        full--;
-        int idx = index_second;
-        index_second = (index_second + 1) % capacity;
-        notify();
-        return array[idx];
-    }
-}
+import java.util.concurrent.*;
 
 class UDPClient implements Runnable {
     Thread thread;
@@ -68,34 +22,54 @@ class UDPClient implements Runnable {
         DatagramPacket packet = new DatagramPacket(message.getBytes(), message.length(), InetAddress.getLocalHost(), port);
         socket.send(packet);
 
-        DatagramPacket responsePacket = new DatagramPacket(responseString, responseSize);
-        socket.receive(responsePacket);
-        String responseMessage = new String(responseString, 0, responsePacket.getLength());
-        System.out.println(responseMessage);
-        System.out.println("Ack: "+acknowledgement);
+        ExecutorService service = Executors.newSingleThreadExecutor();
 
-        /*
-        Timer timer = new Timer();
-        timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                if()
-            }
-        }, 2000);
-         */
+        final String[] responseMessage = {null};
+        try {
+            Runnable r = new Runnable() {
+                @Override
+                public void run(){
+                    try {
+                        DatagramPacket responsePacket = new DatagramPacket(responseString, responseSize);
+                        socket.receive(responsePacket);
+                        responseMessage[0] = new String(responseString, 0, responsePacket.getLength());
+                        System.out.println(responseMessage[0]);
+                        System.out.println("Ack: "+acknowledgement);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            };
 
+            Future<?> future = service.submit(r);
+            future.get(2, TimeUnit.SECONDS);
+        } catch(final RuntimeException | InterruptedException | ExecutionException exc) {
+            throw new RuntimeException(exc);
+        } catch(final TimeoutException exc) {
+            return true;
+        }
+        // Validate response message
+        System.out.println(responseMessage[0].equals(Integer.toHexString(acknowledgement)));
+        // If valid return false
         return false;
     }
 
     public void run() {
         while(true) {
-            String ackMessage = Integer.toHexString(buffer.index_second);
+            String ackMessage = Integer.toHexString(buffer.getIndex_second());
             if(ackMessage.length() == 1) ackMessage = "0" + ackMessage;
             String response = ackMessage + buffer.get();
             System.out.println(response);
             // udp send and wait for acknowledgement
             try {
-                while (udp_send(response,Integer.valueOf(ackMessage, 16))) {
+                boolean udp_ack = true;
+                while (udp_ack) {
+                    udp_ack = udp_send(response,Integer.valueOf(ackMessage, 16));
+                    if(udp_ack == true) {
+                        System.out.println("Failed to send.");
+                    } else {
+                        System.out.println("Successfully send.");
+                    }
                 }
             } catch(IOException exc) {
                 System.out.println("Socket exception " + exc.getMessage());
@@ -132,7 +106,7 @@ class Producer implements Runnable {
     }
 }
 
-public class ServerLogger {
+public class ClientLoggerUDP {
     public static void main(String[] args) {
         // Test
         Buffer buffer = new Buffer(17);
